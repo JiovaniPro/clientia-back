@@ -1,0 +1,883 @@
+// CLIENTIA — schéma multi-tenant
+// Voir C:\Users\WINDOWS 11\.claude\plans\drifting-hopping-origami.md pour le contexte architectural.
+//
+// Règle transverse : toute table métier porte `organizationId` et est censée être
+// lue/écrite exclusivement via le client Prisma scopé (src/db/scopedClient.ts),
+// jamais via le client brut, en dehors du module `platform` (Super Admin).
+//
+// Reconstruit le 2026-09-03 à partir des artefacts générés (src/generated/prisma/models/*.ts,
+// section $XPayload) après qu'une modification externe au disque a remplacé ce fichier par
+// l'ancien schéma à rôles fixes — voir la conversation pour le détail de l'incident.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =========================================================================
+// Plateforme (hors organisation)
+// =========================================================================
+
+model Organization {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  logoUrl      String?
+  primaryColor String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // back-relations — toutes les tables tenant-scoped ci-dessous, une par table
+  roles                  Role[]
+  configurableListItems  ConfigurableListItem[]
+  customFieldDefinitions CustomFieldDefinition[]
+  users                  User[]
+  calls                  Call[]
+  reminders              Reminder[]
+  notifications          Notification[]
+  settings               Setting[]
+  auditLogs              AuditLog[]
+  clients                Client[]
+  calendars              Calendar[]
+  calendarEvents         CalendarEvent[]
+  eventCategories        EventCategory[]
+  emailTemplates         EmailTemplate[]
+  emailHistory           EmailHistory[]
+  emailQueue             EmailQueue[]
+}
+
+/// Administrateur de plateforme ("Super Admin") — délibérément un modèle séparé de
+/// `User` (pas un simple flag `isSuperAdmin` sur `User`) : il n'appartient à aucune
+/// organisation, donc ne doit jamais transiter par le client Prisma scopé.
+model PlatformAdmin {
+  id        String            @id @default(cuid())
+  email     String            @unique
+  password  String
+  name      String?
+  isActive  Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  sessions  PlatformSession[]
+}
+
+model PlatformSession {
+  id              String        @id @default(cuid())
+  platformAdminId String
+  platformAdmin   PlatformAdmin @relation(fields: [platformAdminId], references: [id])
+  refreshToken    String        @unique
+  userAgent       String?
+  ipAddress       String?
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@index([platformAdminId])
+  @@index([expiresAt])
+}
+
+/// Catalogue de permissions — global à la plateforme, PAS scopé par organisation.
+/// C'est le "menu" dans lequel chaque organisation compose ses rôles (voir Role/RolePermission).
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique // ex: "clients.editFinalStatus"
+  module      String // regroupement d'affichage, ex: "Clients"
+  label       String
+  description String?
+  rolePerms   RolePermission[]
+}
+
+// =========================================================================
+// Administration dynamique par organisation
+// =========================================================================
+
+model Role {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  name           String
+  description    String?
+  color          String?
+  isSystem       Boolean          @default(false) // true pour les 3 rôles pré-remplis — empêche la suppression, pas l'édition
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  permissions    RolePermission[]
+  users          User[]
+
+  @@unique([organizationId, name])
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+}
+
+/// Remplace les enums métier variables par organisation (CallStatus, ClientDossierStatus,
+/// ClientFinalStatus, ClientCountry, ClientCivilite, ClientMaritalStatus, ClientChildren,
+/// ClientTypeRdv...). `listKey` identifie la liste, `key` est l'identifiant stable utilisé
+/// par les enregistrements historiques (le libellé, lui, peut changer sans casser l'historique).
+model ConfigurableListItem {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  listKey        String // ex: "CALL_STATUS", "CLIENT_FINAL_STATUS"...
+  key            String // ex: "A_CONTACTER" — stable, jamais réutilisé pour une autre valeur
+  label          String
+  color          String?
+  order          Int          @default(0)
+  isActive       Boolean      @default(true) // désactivation logique — jamais de suppression physique si déjà utilisée
+  isDefault      Boolean      @default(false) // valeur "neutre" par défaut de la liste (ex. équivalent de A_CONTACTER)
+  metadata       Json? // propriétés comportementales, ex: {"requiresRecallDate": true}
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // back-relations — une par FK de Call/CallStatusHistory/Client vers cette table,
+  // noms distincts requis car plusieurs FK d'un même modèle pointent ici.
+  callsWithStatus        Call[]              @relation("CallStatusItem")
+  callStatusHistoryAsOld CallStatusHistory[] @relation("CallStatusHistoryOld")
+  callStatusHistoryAsNew CallStatusHistory[] @relation("CallStatusHistoryNew")
+  clientsAsDossierStatus Client[]            @relation("ClientDossierStatus")
+  clientsAsCountry       Client[]            @relation("ClientCountry")
+  clientsAsCivilite      Client[]            @relation("ClientCivilite")
+  clientsAsMaritalStatus Client[]            @relation("ClientMaritalStatus")
+  clientsAsChildren      Client[]            @relation("ClientChildren")
+  clientsAsTypeRdv       Client[]            @relation("ClientTypeRdv")
+  clientsAsFinalStatus   Client[]            @relation("ClientFinalStatus")
+
+  @@unique([organizationId, listKey, key])
+  @@index([organizationId, listKey])
+}
+
+model CustomFieldDefinition {
+  id             String             @id @default(cuid())
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  entityType     String // ex: "CLIENT" — extensible sans migration (validé en app par un allowlist)
+  key            String
+  label          String
+  fieldType      CustomFieldType
+  options        Json? // tableau de choix pour SELECT/MULTISELECT
+  isRequired     Boolean            @default(false)
+  order          Int                @default(0)
+  section        String?
+  isActive       Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  values         CustomFieldValue[]
+
+  @@unique([organizationId, entityType, key])
+}
+
+enum CustomFieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  DATE
+  SELECT
+  MULTISELECT
+  CHECKBOX
+  EMAIL
+  PHONE
+}
+
+model CustomFieldValue {
+  id           String                @id @default(cuid())
+  definitionId String
+  definition   CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  entityId     String // ex: Client.id — polymorphe, pas de FK DB possible
+  value        Json
+
+  @@unique([definitionId, entityId])
+}
+
+// =========================================================================
+// Utilisateurs, sessions
+// =========================================================================
+
+model User {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  email          String
+  password       String
+  firstName      String?
+  lastName       String?
+  roleId         String
+  role           Role         @relation(fields: [roleId], references: [id])
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  sessions              Session[]
+  callsOwned            Call[]                       @relation("CallOwner")
+  callStatusChanges     CallStatusHistory[]          @relation("CallStatusChangedBy")
+  reminders             Reminder[]
+  notifications         Notification[]
+  settings              Setting[]
+  auditLogs             AuditLog[]
+  clientsAsTelephoniste Client[]                     @relation("ClientTelephoniste")
+  clientsAsAgent        Client[]                     @relation("ClientAgent")
+  calendars             Calendar[]
+  eventsOrganized       CalendarEvent[]              @relation("EventOrganizer")
+  eventsAsAgentRdv      CalendarEvent[]              @relation("EventAgentRdv")
+  eventStatusChanges    CalendarEventStatusHistory[] @relation("EventStatusChangedBy")
+  eventCategories       EventCategory[]
+  eventAttendances      EventAttendee[]
+  emailHistoryCreated   EmailHistory[]               @relation("EmailHistoryAgent")
+  emailQueueCreated     EmailQueue[]                 @relation("EmailQueueCreatedBy")
+  emailQueueReceived    EmailQueue[]                 @relation("EmailQueueRecipientUser")
+  conflictsResolved     EventConflict[]              @relation("ConflictResolvedBy")
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  refreshToken String    @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// =========================================================================
+// Appels
+// =========================================================================
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallType {
+  PROSPECTION
+  SUPPORT
+  FOLLOW_UP
+  OTHER
+}
+
+model Call {
+  id             String               @id @default(cuid())
+  organizationId String
+  organization   Organization         @relation(fields: [organizationId], references: [id])
+  userId         String
+  user           User                 @relation("CallOwner", fields: [userId], references: [id])
+  direction      CallDirection
+  type           CallType
+  statusId       String
+  status         ConfigurableListItem @relation("CallStatusItem", fields: [statusId], references: [id])
+  waveNumber     Int? // numéro de vague d'import, immuable une fois défini, propre à chaque utilisateur
+  fromNumber     String
+  toNumber       String
+  durationSec    Int?
+  notes          String?
+  occurredAt     DateTime
+  firstName      String?
+  lastName       String?
+  email          String?
+  recallDate     DateTime?
+  recallTimeSlot String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  statusHistory  CallStatusHistory[]
+  reminders      Reminder[]
+  client         Client?
+  calendarEvents CalendarEvent[]
+
+  @@index([userId, occurredAt])
+  @@index([userId, waveNumber])
+  @@index([statusId])
+  @@index([type])
+  @@index([recallDate])
+  @@index([organizationId])
+}
+
+model CallStatusHistory {
+  id          String                @id @default(cuid())
+  callId      String
+  call        Call                  @relation(fields: [callId], references: [id], onDelete: Cascade)
+  oldStatusId String?
+  oldStatus   ConfigurableListItem? @relation("CallStatusHistoryOld", fields: [oldStatusId], references: [id])
+  newStatusId String
+  newStatus   ConfigurableListItem  @relation("CallStatusHistoryNew", fields: [newStatusId], references: [id])
+  changedAt   DateTime              @default(now())
+  changedById String
+  changedBy   User                  @relation("CallStatusChangedBy", fields: [changedById], references: [id])
+
+  @@index([callId])
+}
+
+// =========================================================================
+// Rappels, notifications, préférences, audit
+// =========================================================================
+
+enum ReminderStatus {
+  PENDING
+  DONE
+  CANCELED
+}
+
+model Reminder {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  userId         String
+  user           User           @relation(fields: [userId], references: [id])
+  callId         String?
+  call           Call?          @relation(fields: [callId], references: [id])
+  title          String
+  description    String?
+  dueAt          DateTime
+  status         ReminderStatus @default(PENDING)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([organizationId])
+  @@index([userId, dueAt])
+}
+
+enum NotificationType {
+  REMINDER_DUE
+  CALL_ASSIGNED
+  DAILY_DIGEST
+  SYSTEM
+  CLIENT_UPDATED_BY_ADMIN
+  APPOINTMENT_ASSIGNED
+  APPOINTMENT_CONFIRMED
+  APPOINTMENT_REFUSED
+  APPOINTMENT_UPDATED
+  /// Participant interne ajouté à un événement (sous-lot C2 — point 2 du retour de test) :
+  /// redirection au clic vers l'événement via meta.eventId, même convention que APPOINTMENT_*.
+  EVENT_INVITATION
+  /// Rappel configurable (EventReminder, sous-lot C3), méthode POPUP ou SOUND
+  /// uniquement (EMAIL passe par EmailQueue, pas par une Notification) — délibérément
+  /// distinct de REMINDER_DUE (jamais implémenté, prévu pour le modèle Reminder
+  /// autonome/suivi d'appel, un domaine différent) pour ne jamais mélanger les deux
+  /// à l'affichage. meta: { eventId, method, occurrenceStartAt }.
+  EVENT_REMINDER
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  userId         String
+  user           User             @relation(fields: [userId], references: [id])
+  type           NotificationType
+  title          String
+  body           String?
+  readAt         DateTime?
+  meta           Json?
+  createdAt      DateTime         @default(now())
+
+  @@index([organizationId])
+  @@index([userId, readAt])
+}
+
+model Setting {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  key            String
+  value          Json
+
+  @@unique([userId, key])
+  @@index([organizationId])
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  CALL_CREATED
+  CALL_UPDATED
+  CALL_DELETED
+  CALL_IMPORTED
+  REMINDER_CREATED
+  REMINDER_UPDATED
+  REMINDER_DELETED
+  SETTINGS_UPDATED
+  USER_CREATED
+  USER_UPDATED
+  USER_ACTIVATED
+  USER_DEACTIVATED
+  PASSWORD_RESET
+  CLIENT_CREATED
+  CLIENT_UPDATED
+  CLIENT_DELETED
+  EVENT_CREATED
+  EVENT_UPDATED
+  EVENT_DELETED
+  APPOINTMENT_STATUS_CHANGED
+  ROLE_CREATED
+  ROLE_UPDATED
+  ROLE_DELETED
+  CONFIGURABLE_LIST_ITEM_CREATED
+  CONFIGURABLE_LIST_ITEM_UPDATED
+  CUSTOM_FIELD_CREATED
+  CUSTOM_FIELD_UPDATED
+  CUSTOM_FIELD_DELETED
+  EMAIL_TEMPLATE_CREATED
+  EMAIL_TEMPLATE_UPDATED
+  EMAIL_SENT
+  ORGANIZATION_CREATED
+  ORGANIZATION_UPDATED
+  ORGANIZATION_DEACTIVATED
+}
+
+/// `organizationId` nullable : les actions du module `platform` (Super Admin, ex. création
+/// d'une organisation) s'y loggent avec organizationId = null — la seule table métier où
+/// cette nullabilité est volontaire, car ces actions ne relèvent d'aucune organisation.
+model AuditLog {
+  id             String        @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id])
+  action         AuditAction
+  entity         String?
+  entityId       String?
+  ipAddress      String?
+  userAgent      String?
+  meta           Json?
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([userId])
+  @@index([action])
+}
+
+// =========================================================================
+// Dossiers clients
+// =========================================================================
+
+model Client {
+  id              String                @id @default(cuid())
+  organizationId  String
+  organization    Organization          @relation(fields: [organizationId], references: [id])
+  callId          String                @unique
+  call            Call                  @relation(fields: [callId], references: [id])
+  firstName       String?
+  lastName        String?
+  dossierStatusId String
+  dossierStatus   ConfigurableListItem  @relation("ClientDossierStatus", fields: [dossierStatusId], references: [id])
+  telephonisteId  String // créateur du dossier, non modifiable après création
+  telephoniste    User                  @relation("ClientTelephoniste", fields: [telephonisteId], references: [id])
+  agentId         String
+  agent           User                  @relation("ClientAgent", fields: [agentId], references: [id])
+  phoneNumber     String
+  email           String?
+  countryId       String
+  country         ConfigurableListItem  @relation("ClientCountry", fields: [countryId], references: [id])
+  civiliteId      String?
+  civilite        ConfigurableListItem? @relation("ClientCivilite", fields: [civiliteId], references: [id])
+  maritalStatusId String?
+  maritalStatus   ConfigurableListItem? @relation("ClientMaritalStatus", fields: [maritalStatusId], references: [id])
+  birthDate       DateTime?
+  childrenId      String?
+  children        ConfigurableListItem? @relation("ClientChildren", fields: [childrenId], references: [id])
+  typeRdvId       String?
+  typeRdv         ConfigurableListItem? @relation("ClientTypeRdv", fields: [typeRdvId], references: [id])
+  adresse         String? // obligatoire (app-level) uniquement si typeRdv = RDV_DOMICILE
+  comment         String?
+  finalStatusId   String
+  finalStatus     ConfigurableListItem  @relation("ClientFinalStatus", fields: [finalStatusId], references: [id])
+  adminNote       String? // visible uniquement par la permission clients.viewAdminNote
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  calendarEvents CalendarEvent[]
+  emailHistory   EmailHistory[]
+  emailQueue     EmailQueue[]
+  // Pas de relation Prisma déclarée vers CustomFieldValue : la liaison se fait via
+  // CustomFieldValue.entityId (polymorphe, String brut), résolue au niveau applicatif —
+  // voir le modèle CustomFieldValue plus haut.
+
+  @@index([organizationId])
+  @@index([telephonisteId])
+  @@index([agentId])
+  @@index([dossierStatusId])
+  @@index([countryId])
+  @@index([finalStatusId])
+  @@index([typeRdvId])
+}
+
+// =========================================================================
+// Calendrier — CalendarEvent fusionne l'ancien modèle Appointment (décision actée :
+// un seul modèle plutôt que deux systèmes pontés, voir §7.4 du doc source).
+// =========================================================================
+
+model Calendar {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  name           String
+  color          String
+  isVisible      Boolean      @default(true)
+  isDefault      Boolean      @default(false)
+  timezone       String       @default("Europe/Paris")
+  description    String?
+  /// Flag explicite plutôt qu'un test sur le nom "Calendrier Global" (amélioration actée —
+  /// le système actuel teste le nom exact, ce qui casse silencieusement si renommé).
+  isGlobal       Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  events CalendarEvent[]
+
+  @@unique([userId, name])
+  @@index([organizationId])
+}
+
+enum EventType {
+  APPOINTMENT
+  MEETING
+  PERSONAL
+  BLOCKED_TIME
+  REMINDER_EVENT
+}
+
+enum EventAvailability {
+  FREE
+  TENTATIVE
+  BUSY
+  OUT_OF_OFFICE
+}
+
+enum EventPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+/// Pertinent uniquement quand CalendarEvent.type = APPOINTMENT.
+enum AppointmentStatus {
+  EN_ATTENTE_DE_CONFIRMATION
+  CONFIRME
+  ANNULE
+  REFUSE
+}
+
+model CalendarEvent {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  calendarId     String
+  calendar       Calendar          @relation(fields: [calendarId], references: [id])
+  title          String
+  description    String?
+  location       String?
+  startAt        DateTime
+  endAt          DateTime
+  timezone       String            @default("Europe/Paris")
+  isAllDay       Boolean           @default(false)
+  type           EventType
+  availability   EventAvailability @default(BUSY)
+  priority       EventPriority     @default(NORMAL)
+  recurrenceRule String? // format RRULE (RFC5545)
+  recurrenceId   String? // pointe vers l'événement parent pour une occurrence modifiée
+  parentEvent    CalendarEvent?    @relation("EventRecurrence", fields: [recurrenceId], references: [id])
+  occurrences    CalendarEvent[]   @relation("EventRecurrence")
+  isRecurring    Boolean           @default(false)
+  exceptionDates Json? // tableau de dates ISO exclues de la récurrence
+  isPrivate      Boolean           @default(false)
+  categoryId     String?
+  category       EventCategory?    @relation(fields: [categoryId], references: [id])
+  tags           String[]
+  organizerId    String
+  organizer      User              @relation("EventOrganizer", fields: [organizerId], references: [id])
+  callId         String?
+  call           Call?             @relation(fields: [callId], references: [id])
+  clientId       String?
+  client         Client?           @relation(fields: [clientId], references: [id])
+
+  // --- champs fusionnés depuis l'ancien modèle Appointment (pertinents si type = APPOINTMENT) ---
+  agentRdvId        String?
+  agentRdv          User?              @relation("EventAgentRdv", fields: [agentRdvId], references: [id])
+  status            AppointmentStatus?
+  callNotesSnapshot String? // copie des notes de l'appel au moment de la création du RDV
+  agentComment      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attendees       EventAttendee[]
+  reminders       EventReminder[]
+  reminderFirings EventReminderFiring[]
+  statusHistory   CalendarEventStatusHistory[]
+  conflictsA      EventConflict[]              @relation("ConflictEventA")
+  conflictsB      EventConflict[]              @relation("ConflictEventB")
+  emailHistory    EmailHistory[]
+  emailQueue      EmailQueue[]
+
+  @@index([organizationId])
+  @@index([calendarId, startAt])
+  @@index([organizerId, startAt])
+  @@index([recurrenceId])
+  @@index([type, availability])
+  @@index([startAt, endAt])
+  @@index([agentRdvId, status])
+}
+
+model CalendarEventStatusHistory {
+  id          String             @id @default(cuid())
+  eventId     String
+  event       CalendarEvent      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  oldStatus   AppointmentStatus?
+  newStatus   AppointmentStatus
+  changedAt   DateTime           @default(now())
+  changedById String
+  changedBy   User               @relation("EventStatusChangedBy", fields: [changedById], references: [id])
+  comment     String?
+
+  @@index([eventId])
+}
+
+model EventCategory {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  name           String
+  color          String
+  borderColor    String
+  textColor      String       @default("#FFFFFF")
+  icon           String?
+  createdAt      DateTime     @default(now())
+
+  events CalendarEvent[]
+
+  @@unique([userId, name])
+  @@index([organizationId])
+}
+
+enum AttendeeRole {
+  REQUIRED
+  OPTIONAL
+  ORGANIZER
+}
+
+enum AttendeeStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  TENTATIVE
+  DELEGATED
+}
+
+model EventAttendee {
+  id          String         @id @default(cuid())
+  eventId     String
+  event       CalendarEvent  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?          @relation(fields: [userId], references: [id])
+  email       String
+  name        String?
+  role        AttendeeRole
+  status      AttendeeStatus @default(PENDING)
+  respondedAt DateTime?
+  comment     String?
+
+  @@unique([eventId, email])
+}
+
+/// Le mode SMS a été retiré (décision actée) — jamais implémenté dans le produit
+/// d'origine, retiré plutôt que reconduit sans intégration réelle.
+enum ReminderMethod {
+  POPUP
+  EMAIL
+  SOUND
+}
+
+model EventReminder {
+  id            String         @id @default(cuid())
+  eventId       String
+  event         CalendarEvent  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  minutesBefore Int
+  method        ReminderMethod
+  createdAt     DateTime       @default(now())
+
+  firings EventReminderFiring[]
+}
+
+/**
+ * Journal d'envoi par occurrence (sous-lot C3) — un `EventReminder` simple
+ * n'a qu'un seul `startAt` à comparer, mais un rappel posé sur un événement
+ * récurrent doit se déclencher à CHAQUE occurrence recalculée (décision actée :
+ * "chaque occurrence, pas seulement le modèle"). Un unique booléen `isSent` sur
+ * `EventReminder` (design initial, jamais implémenté) ne peut pas représenter
+ * "envoyé pour l'occurrence du 12/09 mais pas celle du 19/09" — remplacé ici par
+ * une ligne par occurrence effectivement traitée, avec une contrainte unique qui
+ * sert à la fois de journal ET de verrou anti-doublon (le job de rappel s'appuie
+ * dessus pour ne jamais renvoyer deux fois le même rappel).
+ */
+model EventReminderFiring {
+  id                String        @id @default(cuid())
+  reminderId        String
+  reminder          EventReminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  eventId           String
+  event             CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  occurrenceStartAt DateTime
+  firedAt           DateTime      @default(now())
+
+  @@unique([reminderId, occurrenceStartAt])
+  @@index([eventId])
+}
+
+enum ConflictSeverity {
+  INFO // < 30% de chevauchement
+  WARNING // 30-70%
+  CRITICAL // > 70%
+}
+
+model EventConflict {
+  id             String           @id @default(cuid())
+  eventId        String
+  event          CalendarEvent    @relation("ConflictEventA", fields: [eventId], references: [id], onDelete: Cascade)
+  conflictingId  String
+  conflicting    CalendarEvent    @relation("ConflictEventB", fields: [conflictingId], references: [id], onDelete: Cascade)
+  severity       ConflictSeverity
+  overlapMinutes Int
+  isResolved     Boolean          @default(false)
+  resolvedAt     DateTime?
+  resolvedById   String?
+  resolvedBy     User?            @relation("ConflictResolvedBy", fields: [resolvedById], references: [id])
+
+  @@unique([eventId, conflictingId])
+}
+
+// =========================================================================
+// E-mails
+// =========================================================================
+
+/// Modèles d'e-mail éditables en base, par organisation (décision actée : plus de
+/// templates codés en dur — chaque organisation part des 7 modèles par défaut,
+/// modifiables/remplaçables ensuite). `key` reste stable même si le libellé change,
+/// pour que la file/l'historique restent valides après une édition.
+model EmailTemplate {
+  id                    String       @id @default(cuid())
+  organizationId        String
+  organization          Organization @relation(fields: [organizationId], references: [id])
+  key                   String // ex: "confirmation_domicile", "rappel", "confirmation_veille"...
+  label                 String
+  subject               String
+  body                  String // avec placeholders de variables
+  defaultAttachmentPath String?
+  isActive              Boolean      @default(true)
+  isSystem              Boolean      @default(false) // marque les 7 modèles fournis par défaut — reste éditable
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  history EmailHistory[]
+  queue   EmailQueue[]
+
+  @@unique([organizationId, key])
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model EmailHistory {
+  id                  String         @id @default(cuid())
+  organizationId      String
+  organization        Organization   @relation(fields: [organizationId], references: [id])
+  clientId            String
+  client              Client         @relation(fields: [clientId], references: [id])
+  appointmentEventId  String?
+  appointmentEvent    CalendarEvent? @relation(fields: [appointmentEventId], references: [id])
+  emailTemplateId     String
+  emailTemplate       EmailTemplate  @relation(fields: [emailTemplateId], references: [id])
+  templateKeySnapshot String // dénormalisé au moment de l'envoi, pour un historique stable
+  subject             String
+  body                String
+  recipientEmail      String
+  attachments         Json? // [{filename, path, size, isDefault}]
+  sentAt              DateTime?
+  agentCallisteId     String
+  agentCalliste       User           @relation("EmailHistoryAgent", fields: [agentCallisteId], references: [id])
+  status              EmailStatus
+  errorMessage        String?
+  isAutomated         Boolean        @default(false)
+  createdAt           DateTime       @default(now())
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([appointmentEventId])
+}
+
+enum EmailQueueStatus {
+  QUEUED
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+  SKIPPED
+}
+
+/// Réellement consommée par un job cron (décision actée) — contrairement au système
+/// d'origine où cette file n'était jamais traitée malgré son schéma complet.
+model EmailQueue {
+  id                 String           @id @default(cuid())
+  organizationId     String
+  organization       Organization     @relation(fields: [organizationId], references: [id])
+  appointmentEventId String?
+  appointmentEvent   CalendarEvent?   @relation(fields: [appointmentEventId], references: [id])
+  /// Nullable depuis le sous-lot C3 : une ligne "rappel interne" (destinataire =
+  /// User, pas de dossier client) n'a ni client ni modèle d'e-mail organisation —
+  /// voir recipientUserId/directSubject/directBody ci-dessous. Toute ligne doit
+  /// porter SOIT clientId (flux client historique, inchangé), SOIT recipientUserId
+  /// (nouveau) — vérifié en application, pas en contrainte SQL (Prisma ne fait pas
+  /// de CHECK multi-colonnes portable).
+  clientId        String?
+  client          Client?       @relation(fields: [clientId], references: [id])
+  emailTemplateId String?
+  emailTemplate   EmailTemplate? @relation(fields: [emailTemplateId], references: [id])
+  /// Destinataire interne (rappel d'événement, sous-lot C3) — alternative à
+  /// clientId. Pas de compte externe possible ici : un rappel ne concerne que
+  /// l'organisateur, toujours un User de l'organisation.
+  recipientUserId String?
+  recipientUser   User?    @relation("EmailQueueRecipientUser", fields: [recipientUserId], references: [id])
+  /// Utilisés uniquement quand emailTemplateId est absent (rappels : contenu fixe
+  /// composé au moment de l'enqueue, pas de placeholders/template organisation —
+  /// hors périmètre de C3, pas demandé).
+  directSubject      String?
+  directBody         String?
+  scheduledAt        DateTime
+  status             EmailQueueStatus @default(QUEUED)
+  retryCount         Int              @default(0)
+  maxRetries         Int              @default(3)
+  errorMessage       String?
+  processedAt        DateTime?
+  isAutomated        Boolean          @default(true)
+  createdById        String?
+  createdBy          User?            @relation("EmailQueueCreatedBy", fields: [createdById], references: [id])
+  createdAt          DateTime         @default(now())
+
+  @@index([organizationId])
+  @@index([status, scheduledAt])
+}
