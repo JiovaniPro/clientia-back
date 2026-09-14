@@ -11,7 +11,7 @@ reportsRouter.use(authMiddleware, tenantMiddleware, requirePermission("reports.v
 reportsRouter.get("/calls", async (req, res, next) => {
   try {
     const query = reportsRangeQuerySchema.parse(req.query);
-    res.json(await reportsService.getCallsReport(req.db!, query));
+    res.json(await reportsService.getCallsReport(req.db!, req.user!, query));
   } catch (error) {
     next(error);
   }
@@ -29,7 +29,7 @@ reportsRouter.get("/clients", async (req, res, next) => {
 reportsRouter.get("/appointments", async (req, res, next) => {
   try {
     const query = reportsRangeQuerySchema.parse(req.query);
-    res.json(await reportsService.getAppointmentsReport(req.db!, query));
+    res.json(await reportsService.getAppointmentsReport(req.db!, req.user!, query));
   } catch (error) {
     next(error);
   }

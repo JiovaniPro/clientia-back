@@ -65,7 +65,11 @@ export async function listCalls(db: ScopedPrismaClient, user: AuthenticatedUser,
   ]);
 
   const where: Record<string, unknown> = {};
-  if (!canViewAll(user)) {
+  if (canViewAll(user)) {
+    // §5.18 — un agent précis, uniquement disponible avec calls.viewAll ; sans
+    // elle, `query.userId` est ignoré ci-dessous (branche else), jamais fait confiance.
+    if (query.userId) where.userId = query.userId;
+  } else {
     where.userId = user.id;
   }
   if (statusFilter || excludeStatusFilter) {
@@ -102,7 +106,13 @@ export async function listCalls(db: ScopedPrismaClient, user: AuthenticatedUser,
       orderBy,
       skip: (query.page - 1) * query.pageSize,
       take: query.pageSize,
-      include: { status: true, client: { select: { id: true } } },
+      include: {
+        status: true,
+        client: { select: { id: true } },
+        // §5.18 — colonne "Agent" du Journal, résolue ici plutôt que par un
+        // aller-retour /users supplémentaire côté écran.
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
     }),
     db.call.count({ where }),
   ]);

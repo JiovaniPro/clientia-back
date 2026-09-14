@@ -2,13 +2,34 @@ import type { ScopedPrismaClient } from "../../db/scopedClient.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 import { AuditAction } from "../../generated/prisma/enums.js";
 import { recordAuditLog } from "../../lib/auditLog.js";
-import { Conflict, NotFound } from "../../lib/httpError.js";
+import { BadRequest, Conflict, NotFound } from "../../lib/httpError.js";
 import type { AuthenticatedUser } from "../../types/express.js";
 import type {
   CreateCustomFieldDefinitionInput,
   SetCustomFieldValuesInput,
   UpdateCustomFieldDefinitionInput,
 } from "./schema.js";
+
+/** Seul `CLIENT` est pris en charge en V1 (voir assertEntityBelongsToOrg ci-dessous,
+ * seul point qui lit réellement les valeurs) — une définition créée pour un autre
+ * type d'entité serait acceptée mais ne serait jamais lisible/écrivable. */
+export const SUPPORTED_ENTITY_TYPES = ["CLIENT"] as const;
+
+function assertSupportedEntityType(entityType: string) {
+  if (!(SUPPORTED_ENTITY_TYPES as readonly string[]).includes(entityType)) {
+    throw BadRequest(
+      `Type d'entité non pris en charge : "${entityType}" (attendu : ${SUPPORTED_ENTITY_TYPES.join(", ")})`,
+    );
+  }
+}
+
+const CHOICE_FIELD_TYPES = new Set(["SELECT", "MULTISELECT"]);
+
+function assertOptionsForChoiceFields(fieldType: string, options: string[] | undefined) {
+  if (CHOICE_FIELD_TYPES.has(fieldType) && (!options || options.length === 0)) {
+    throw BadRequest(`Le type "${fieldType}" nécessite au moins une option`);
+  }
+}
 
 /**
  * `CustomFieldValue.entityId` est polymorphe (String brut, pas de FK) — la garantie
@@ -26,8 +47,15 @@ async function assertEntityBelongsToOrg(db: ScopedPrismaClient, entityType: stri
   throw NotFound(`Type d'entité non pris en charge : ${entityType}`);
 }
 
-export async function listDefinitions(db: ScopedPrismaClient, entityType: string) {
-  return db.customFieldDefinition.findMany({ where: { entityType, isActive: true }, orderBy: { order: "asc" } });
+export async function listDefinitions(
+  db: ScopedPrismaClient,
+  entityType: string,
+  options: { includeInactive?: boolean } = {},
+) {
+  return db.customFieldDefinition.findMany({
+    where: { entityType, ...(options.includeInactive ? {} : { isActive: true }) },
+    orderBy: { order: "asc" },
+  });
 }
 
 export async function createDefinition(
@@ -35,6 +63,9 @@ export async function createDefinition(
   user: AuthenticatedUser,
   input: CreateCustomFieldDefinitionInput,
 ) {
+  assertSupportedEntityType(input.entityType);
+  assertOptionsForChoiceFields(input.fieldType, input.options);
+
   const existing = await db.customFieldDefinition.findFirst({
     where: { entityType: input.entityType, key: input.key },
   });
@@ -71,6 +102,9 @@ export async function updateDefinition(
 ) {
   const existing = await db.customFieldDefinition.findUnique({ where: { id } });
   if (!existing) throw NotFound("Champ personnalisé introuvable");
+  if (input.options !== undefined) {
+    assertOptionsForChoiceFields(existing.fieldType, input.options);
+  }
 
   const definition = await db.customFieldDefinition.update({
     where: { id },
@@ -96,7 +130,20 @@ export async function updateDefinition(
 export async function deleteDefinition(db: ScopedPrismaClient, user: AuthenticatedUser, id: string) {
   const existing = await db.customFieldDefinition.findUnique({ where: { id } });
   if (!existing) throw NotFound("Champ personnalisé introuvable");
-  await db.customFieldDefinition.delete({ where: { id } }); // cascade sur CustomFieldValue (voir schema.prisma)
+
+  // Garde-fou ajouté après audit : la relation vers CustomFieldValue est en
+  // `onDelete: Cascade` (voir schema.prisma) — sans cette vérification explicite,
+  // supprimer une définition détruit silencieusement toutes les valeurs déjà
+  // saisies par les agents sur des dossiers clients réels. Contrairement à
+  // ConfigurableListItem (§5.22), aucune contrainte DB ne bloque ce cas puisque
+  // le cascade est voulu techniquement (nettoyer les valeurs orphelines quand la
+  // suppression EST autorisée) — le blocage doit donc être fait au niveau service.
+  const valueCount = await db.customFieldValue.count({ where: { definitionId: id } });
+  if (valueCount > 0) {
+    throw Conflict("Ce champ personnalisé a déjà des valeurs saisies, il ne peut pas être supprimé");
+  }
+
+  await db.customFieldDefinition.delete({ where: { id } });
   await recordAuditLog(db, {
     userId: user.id,
     action: AuditAction.CUSTOM_FIELD_DELETED,

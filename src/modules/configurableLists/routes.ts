@@ -18,6 +18,11 @@ configurableListsRouter.get("/", async (req, res, next) => {
   }
 });
 
+// Doit être déclarée avant "/:listKey" pour ne pas être interprétée comme une clé de liste.
+configurableListsRouter.get("/behavior-flags-catalog", async (_req, res) => {
+  res.json(configurableListsService.listBehaviorFlagsCatalog());
+});
+
 configurableListsRouter.get("/:listKey", async (req, res, next) => {
   try {
     res.json(await configurableListsService.listItemsForKey(req.db!, requireParam(req, "listKey")));
@@ -39,6 +44,15 @@ configurableListsRouter.patch("/items/:id", requirePermission("configurableLists
   try {
     const input = updateListItemSchema.parse(req.body);
     res.json(await configurableListsService.updateListItem(req.db!, req.user!, requireParam(req, "id"), input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+configurableListsRouter.delete("/items/:id", requirePermission("configurableLists.manage"), async (req, res, next) => {
+  try {
+    await configurableListsService.deleteListItem(req.db!, req.user!, requireParam(req, "id"));
+    res.status(204).send();
   } catch (error) {
     next(error);
   }

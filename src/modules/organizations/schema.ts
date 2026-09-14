@@ -17,7 +17,9 @@ export type CreateOrganizationInput = z.infer<typeof createOrganizationSchema>;
 
 export const updateOrganizationSchema = z.object({
   name: z.string().min(2).optional(),
-  logoUrl: z.string().url().optional(),
+  // nullable : `null` efface explicitement le logo — un simple `undefined` (champ
+  // absent) laisse la valeur existante inchangée, comme pour les autres champs.
+  logoUrl: z.string().url().nullable().optional(),
   primaryColor: z.string().optional(),
 });
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>;

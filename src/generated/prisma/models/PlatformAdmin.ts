@@ -32,6 +32,7 @@ export type PlatformAdminMinAggregateOutputType = {
   password: string | null
   name: string | null
   isActive: boolean | null
+  mustChangePassword: boolean | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -42,6 +43,7 @@ export type PlatformAdminMaxAggregateOutputType = {
   password: string | null
   name: string | null
   isActive: boolean | null
+  mustChangePassword: boolean | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -52,6 +54,7 @@ export type PlatformAdminCountAggregateOutputType = {
   password: number
   name: number
   isActive: number
+  mustChangePassword: number
   createdAt: number
   updatedAt: number
   _all: number
@@ -64,6 +67,7 @@ export type PlatformAdminMinAggregateInputType = {
   password?: true
   name?: true
   isActive?: true
+  mustChangePassword?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -74,6 +78,7 @@ export type PlatformAdminMaxAggregateInputType = {
   password?: true
   name?: true
   isActive?: true
+  mustChangePassword?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -84,6 +89,7 @@ export type PlatformAdminCountAggregateInputType = {
   password?: true
   name?: true
   isActive?: true
+  mustChangePassword?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -167,6 +173,7 @@ export type PlatformAdminGroupByOutputType = {
   password: string
   name: string | null
   isActive: boolean
+  mustChangePassword: boolean
   createdAt: Date
   updatedAt: Date
   _count: PlatformAdminCountAggregateOutputType | null
@@ -198,6 +205,7 @@ export type PlatformAdminWhereInput = {
   password?: Prisma.StringFilter<"PlatformAdmin"> | string
   name?: Prisma.StringNullableFilter<"PlatformAdmin"> | string | null
   isActive?: Prisma.BoolFilter<"PlatformAdmin"> | boolean
+  mustChangePassword?: Prisma.BoolFilter<"PlatformAdmin"> | boolean
   createdAt?: Prisma.DateTimeFilter<"PlatformAdmin"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"PlatformAdmin"> | Date | string
   sessions?: Prisma.PlatformSessionListRelationFilter
@@ -209,6 +217,7 @@ export type PlatformAdminOrderByWithRelationInput = {
   password?: Prisma.SortOrder
   name?: Prisma.SortOrderInput | Prisma.SortOrder
   isActive?: Prisma.SortOrder
+  mustChangePassword?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   sessions?: Prisma.PlatformSessionOrderByRelationAggregateInput
@@ -223,6 +232,7 @@ export type PlatformAdminWhereUniqueInput = Prisma.AtLeast<{
   password?: Prisma.StringFilter<"PlatformAdmin"> | string
   name?: Prisma.StringNullableFilter<"PlatformAdmin"> | string | null
   isActive?: Prisma.BoolFilter<"PlatformAdmin"> | boolean
+  mustChangePassword?: Prisma.BoolFilter<"PlatformAdmin"> | boolean
   createdAt?: Prisma.DateTimeFilter<"PlatformAdmin"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"PlatformAdmin"> | Date | string
   sessions?: Prisma.PlatformSessionListRelationFilter
@@ -234,6 +244,7 @@ export type PlatformAdminOrderByWithAggregationInput = {
   password?: Prisma.SortOrder
   name?: Prisma.SortOrderInput | Prisma.SortOrder
   isActive?: Prisma.SortOrder
+  mustChangePassword?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.PlatformAdminCountOrderByAggregateInput
@@ -250,6 +261,7 @@ export type PlatformAdminScalarWhereWithAggregatesInput = {
   password?: Prisma.StringWithAggregatesFilter<"PlatformAdmin"> | string
   name?: Prisma.StringNullableWithAggregatesFilter<"PlatformAdmin"> | string | null
   isActive?: Prisma.BoolWithAggregatesFilter<"PlatformAdmin"> | boolean
+  mustChangePassword?: Prisma.BoolWithAggregatesFilter<"PlatformAdmin"> | boolean
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"PlatformAdmin"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"PlatformAdmin"> | Date | string
 }
@@ -260,6 +272,7 @@ export type PlatformAdminCreateInput = {
   password: string
   name?: string | null
   isActive?: boolean
+  mustChangePassword?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
   sessions?: Prisma.PlatformSessionCreateNestedManyWithoutPlatformAdminInput
@@ -271,6 +284,7 @@ export type PlatformAdminUncheckedCreateInput = {
   password: string
   name?: string | null
   isActive?: boolean
+  mustChangePassword?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
   sessions?: Prisma.PlatformSessionUncheckedCreateNestedManyWithoutPlatformAdminInput
@@ -282,6 +296,7 @@ export type PlatformAdminUpdateInput = {
   password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mustChangePassword?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.PlatformSessionUpdateManyWithoutPlatformAdminNestedInput
@@ -293,6 +308,7 @@ export type PlatformAdminUncheckedUpdateInput = {
   password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mustChangePassword?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessions?: Prisma.PlatformSessionUncheckedUpdateManyWithoutPlatformAdminNestedInput
@@ -304,6 +320,7 @@ export type PlatformAdminCreateManyInput = {
   password: string
   name?: string | null
   isActive?: boolean
+  mustChangePassword?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -314,6 +331,7 @@ export type PlatformAdminUpdateManyMutationInput = {
   password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mustChangePassword?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -324,6 +342,7 @@ export type PlatformAdminUncheckedUpdateManyInput = {
   password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mustChangePassword?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -334,6 +353,7 @@ export type PlatformAdminCountOrderByAggregateInput = {
   password?: Prisma.SortOrder
   name?: Prisma.SortOrder
   isActive?: Prisma.SortOrder
+  mustChangePassword?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -344,6 +364,7 @@ export type PlatformAdminMaxOrderByAggregateInput = {
   password?: Prisma.SortOrder
   name?: Prisma.SortOrder
   isActive?: Prisma.SortOrder
+  mustChangePassword?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -354,6 +375,7 @@ export type PlatformAdminMinOrderByAggregateInput = {
   password?: Prisma.SortOrder
   name?: Prisma.SortOrder
   isActive?: Prisma.SortOrder
+  mustChangePassword?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -383,6 +405,7 @@ export type PlatformAdminCreateWithoutSessionsInput = {
   password: string
   name?: string | null
   isActive?: boolean
+  mustChangePassword?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -393,6 +416,7 @@ export type PlatformAdminUncheckedCreateWithoutSessionsInput = {
   password: string
   name?: string | null
   isActive?: boolean
+  mustChangePassword?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -419,6 +443,7 @@ export type PlatformAdminUpdateWithoutSessionsInput = {
   password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mustChangePassword?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -429,6 +454,7 @@ export type PlatformAdminUncheckedUpdateWithoutSessionsInput = {
   password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  mustChangePassword?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -470,6 +496,7 @@ export type PlatformAdminSelect<ExtArgs extends runtime.Types.Extensions.Interna
   password?: boolean
   name?: boolean
   isActive?: boolean
+  mustChangePassword?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   sessions?: boolean | Prisma.PlatformAdmin$sessionsArgs<ExtArgs>
@@ -482,6 +509,7 @@ export type PlatformAdminSelectCreateManyAndReturn<ExtArgs extends runtime.Types
   password?: boolean
   name?: boolean
   isActive?: boolean
+  mustChangePassword?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }, ExtArgs["result"]["platformAdmin"]>
@@ -492,6 +520,7 @@ export type PlatformAdminSelectUpdateManyAndReturn<ExtArgs extends runtime.Types
   password?: boolean
   name?: boolean
   isActive?: boolean
+  mustChangePassword?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }, ExtArgs["result"]["platformAdmin"]>
@@ -502,11 +531,12 @@ export type PlatformAdminSelectScalar = {
   password?: boolean
   name?: boolean
   isActive?: boolean
+  mustChangePassword?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type PlatformAdminOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "email" | "password" | "name" | "isActive" | "createdAt" | "updatedAt", ExtArgs["result"]["platformAdmin"]>
+export type PlatformAdminOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "email" | "password" | "name" | "isActive" | "mustChangePassword" | "createdAt" | "updatedAt", ExtArgs["result"]["platformAdmin"]>
 export type PlatformAdminInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   sessions?: boolean | Prisma.PlatformAdmin$sessionsArgs<ExtArgs>
   _count?: boolean | Prisma.PlatformAdminCountOutputTypeDefaultArgs<ExtArgs>
@@ -525,6 +555,14 @@ export type $PlatformAdminPayload<ExtArgs extends runtime.Types.Extensions.Inter
     password: string
     name: string | null
     isActive: boolean
+    /**
+     * true pour un compte créé par un autre Super Admin (§5.29 sous-lot 3) — le
+     * créateur tape le mot de passe initial directement (pas d'infra d'e-mail
+     * disponible pour un compte sans organisation), donc un changement est exigé à
+     * la première connexion. false pour le compte de démo du seed (pas de "créateur"
+     * à qui transmettre ce mot de passe hors-bande).
+     */
+    mustChangePassword: boolean
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["platformAdmin"]>
@@ -956,6 +994,7 @@ export interface PlatformAdminFieldRefs {
   readonly password: Prisma.FieldRef<"PlatformAdmin", 'String'>
   readonly name: Prisma.FieldRef<"PlatformAdmin", 'String'>
   readonly isActive: Prisma.FieldRef<"PlatformAdmin", 'Boolean'>
+  readonly mustChangePassword: Prisma.FieldRef<"PlatformAdmin", 'Boolean'>
   readonly createdAt: Prisma.FieldRef<"PlatformAdmin", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"PlatformAdmin", 'DateTime'>
 }

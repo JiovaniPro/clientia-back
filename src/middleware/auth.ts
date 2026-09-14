@@ -35,7 +35,19 @@ export const authMiddleware: RequestHandler = async (req, _res, next) => {
       },
     });
 
-    if (!user || !user.isActive || !user.organization.isActive) {
+    if (!user) {
+      next(Unauthorized());
+      return;
+    }
+    // Message explicite pour l'organisation suspendue (§5.29) — décision produit :
+    // ne pas laisser croire à une session expirée alors que c'est une action
+    // délibérée du Super Admin. `user.isActive` (compte désactivé par son propre
+    // admin) garde le message générique, cohérent avec /admin/users.
+    if (!user.organization.isActive) {
+      next(Unauthorized("Votre organisation a été suspendue. Contactez votre administrateur."));
+      return;
+    }
+    if (!user.isActive) {
       next(Unauthorized());
       return;
     }

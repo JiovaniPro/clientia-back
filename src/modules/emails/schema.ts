@@ -9,7 +9,6 @@ export const createEmailTemplateSchema = z.object({
 });
 export type CreateEmailTemplateInput = z.infer<typeof createEmailTemplateSchema>;
 
-/** Pas de suppression exposée — les modèles système restent éditables, jamais retirés (voir schema.prisma). */
 export const updateEmailTemplateSchema = z.object({
   label: z.string().optional(),
   subject: z.string().optional(),

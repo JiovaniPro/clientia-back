@@ -119,6 +119,7 @@ export const PlatformAdminScalarFieldEnum = {
   password: 'password',
   name: 'name',
   isActive: 'isActive',
+  mustChangePassword: 'mustChangePassword',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const

@@ -95,6 +95,20 @@ export async function refresh(refreshToken: string, meta: SessionMeta) {
     throw Unauthorized("Session invalide ou expirée");
   }
 
+  // Trouvé en auditant §5.29 : `login()` revérifie déjà user.isActive/organization.isActive,
+  // mais `refresh()` ne le faisait pas — un token de rafraîchissement encore valide aurait pu
+  // émettre un nouvel accessToken pour un compte désactivé ou une organisation suspendue entre
+  // deux rafraîchissements. `authMiddleware` bloquait déjà l'appel API suivant dans tous les
+  // cas (il revérifie en base à chaque requête), donc ce n'était pas une fuite de données —
+  // mais laisser `refresh()` réussir silencieusement dans ce cas restait incohérent.
+  const user = await prisma.user.findUnique({
+    where: { id: payload.sub },
+    include: { organization: { select: { isActive: true } } },
+  });
+  if (!user || !user.isActive || !user.organization.isActive) {
+    throw Unauthorized("Session invalide ou expirée");
+  }
+
   // rotation : l'ancienne session est révoquée, une nouvelle est émise
   await prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
 

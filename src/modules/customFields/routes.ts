@@ -18,7 +18,11 @@ customFieldsRouter.get("/definitions", async (req, res, next) => {
   try {
     const entityType = req.query.entityType;
     if (typeof entityType !== "string") throw BadRequest("Paramètre entityType requis");
-    res.json(await customFieldsService.listDefinitions(req.db!, entityType));
+    // `includeInactive` sert l'écran d'administration (besoin de voir/réactiver les
+    // champs désactivés) — le rendu des formulaires de saisie, lui, n'appelle jamais
+    // ce paramètre et ne voit donc que les champs actifs, comme avant.
+    const includeInactive = req.query.includeInactive === "true";
+    res.json(await customFieldsService.listDefinitions(req.db!, entityType, { includeInactive }));
   } catch (error) {
     next(error);
   }

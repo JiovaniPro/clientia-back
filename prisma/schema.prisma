@@ -60,6 +60,12 @@ model PlatformAdmin {
   password  String
   name      String?
   isActive  Boolean           @default(true)
+  /// true pour un compte créé par un autre Super Admin (§5.29 sous-lot 3) — le
+  /// créateur tape le mot de passe initial directement (pas d'infra d'e-mail
+  /// disponible pour un compte sans organisation), donc un changement est exigé à
+  /// la première connexion. false pour le compte de démo du seed (pas de "créateur"
+  /// à qui transmettre ce mot de passe hors-bande).
+  mustChangePassword Boolean  @default(false)
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
   sessions  PlatformSession[]
@@ -456,15 +462,18 @@ enum AuditAction {
   ROLE_DELETED
   CONFIGURABLE_LIST_ITEM_CREATED
   CONFIGURABLE_LIST_ITEM_UPDATED
+  CONFIGURABLE_LIST_ITEM_DELETED
   CUSTOM_FIELD_CREATED
   CUSTOM_FIELD_UPDATED
   CUSTOM_FIELD_DELETED
   EMAIL_TEMPLATE_CREATED
   EMAIL_TEMPLATE_UPDATED
+  EMAIL_TEMPLATE_DELETED
   EMAIL_SENT
   ORGANIZATION_CREATED
   ORGANIZATION_UPDATED
   ORGANIZATION_DEACTIVATED
+  ORGANIZATION_ACTIVATED
 }
 
 /// `organizationId` nullable : les actions du module `platform` (Super Admin, ex. création

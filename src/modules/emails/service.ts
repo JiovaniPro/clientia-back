@@ -1,4 +1,5 @@
 import type { ScopedPrismaClient } from "../../db/scopedClient.js";
+import { Prisma } from "../../generated/prisma/client.js";
 import { AuditAction } from "../../generated/prisma/enums.js";
 import { recordAuditLog } from "../../lib/auditLog.js";
 import { renderTemplate } from "../../lib/emailTemplating.js";
@@ -92,6 +93,33 @@ export async function updateTemplate(
     entityId: id,
   });
   return template;
+}
+
+/**
+ * Suppression physique, §5.12. `EmailHistory.emailTemplateId` est une FK requise
+ * sans `onDelete` déclaré : Postgres refuse nativement la suppression d'un modèle
+ * déjà référencé par un envoi passé (P2003) — même principe que
+ * `configurableLists.deleteListItem`, pas de comptage applicatif à récrire.
+ */
+export async function deleteTemplate(db: ScopedPrismaClient, user: AuthenticatedUser, id: string) {
+  const existing = await db.emailTemplate.findUnique({ where: { id } });
+  if (!existing) throw NotFound("Modèle introuvable");
+
+  try {
+    await db.emailTemplate.delete({ where: { id } });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      throw Conflict("Ce modèle a déjà été utilisé pour un envoi et ne peut pas être supprimé — désactivez-le à la place.");
+    }
+    throw error;
+  }
+
+  await recordAuditLog(db, {
+    userId: user.id,
+    action: AuditAction.EMAIL_TEMPLATE_DELETED,
+    entity: "EmailTemplate",
+    entityId: id,
+  });
 }
 
 // =========================================================================

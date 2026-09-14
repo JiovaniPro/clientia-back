@@ -17,7 +17,9 @@ export interface RefreshTokenPayload {
 const ACCESS_TOKEN_TTL = "15m";
 const REFRESH_TOKEN_TTL_DAYS = 30;
 
-function requireSecret(name: "JWT_ACCESS_SECRET" | "JWT_REFRESH_SECRET"): string {
+function requireSecret(
+  name: "JWT_ACCESS_SECRET" | "JWT_REFRESH_SECRET" | "JWT_PLATFORM_ACCESS_SECRET" | "JWT_PLATFORM_REFRESH_SECRET",
+): string {
   const secret = process.env[name];
   if (!secret) {
     throw new Error(`${name} manquant dans l'environnement`);
@@ -49,4 +51,44 @@ export function refreshTokenExpiryDate(): Date {
   const date = new Date();
   date.setDate(date.getDate() + REFRESH_TOKEN_TTL_DAYS);
   return date;
+}
+
+/**
+ * §5.29 — jetons Super Admin, signés avec des secrets ENTIÈREMENT SÉPARÉS de ceux
+ * ci-dessus. Ce n'est pas une variante de `AccessTokenPayload` : un token plateforme
+ * doit être structurellement incapable d'être vérifié par `verifyAccessToken` (et
+ * inversement) — un secret différent suffit à le garantir, indépendamment de toute
+ * discipline de code par ailleurs. Voir middleware/platformAuth.ts.
+ */
+export interface PlatformAccessTokenPayload {
+  sub: string;
+}
+
+export interface PlatformRefreshTokenPayload {
+  sub: string;
+  sessionId: string;
+}
+
+export function signPlatformAccessToken(platformAdminId: string): string {
+  return jwt.sign(
+    { sub: platformAdminId } satisfies PlatformAccessTokenPayload,
+    requireSecret("JWT_PLATFORM_ACCESS_SECRET"),
+    { expiresIn: ACCESS_TOKEN_TTL },
+  );
+}
+
+export function verifyPlatformAccessToken(token: string): PlatformAccessTokenPayload {
+  return jwt.verify(token, requireSecret("JWT_PLATFORM_ACCESS_SECRET")) as PlatformAccessTokenPayload;
+}
+
+export function signPlatformRefreshToken(platformAdminId: string, sessionId: string): string {
+  return jwt.sign(
+    { sub: platformAdminId, sessionId } satisfies PlatformRefreshTokenPayload,
+    requireSecret("JWT_PLATFORM_REFRESH_SECRET"),
+    { expiresIn: `${REFRESH_TOKEN_TTL_DAYS}d` },
+  );
+}
+
+export function verifyPlatformRefreshToken(token: string): PlatformRefreshTokenPayload {
+  return jwt.verify(token, requireSecret("JWT_PLATFORM_REFRESH_SECRET")) as PlatformRefreshTokenPayload;
 }

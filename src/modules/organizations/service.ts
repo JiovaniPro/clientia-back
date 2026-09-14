@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "../../db/prisma.js";
-import type { ScopedPrismaClient } from "../../db/scopedClient.js";
+import { getScopedClient, type ScopedPrismaClient } from "../../db/scopedClient.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 import { AuditAction } from "../../generated/prisma/enums.js";
 import { recordAuditLog } from "../../lib/auditLog.js";
@@ -10,12 +10,23 @@ import type { AuthenticatedUser } from "../../types/express.js";
 import { provisionDefaultOrganizationData } from "./defaultData.js";
 import type { CreateOrganizationInput, UpdateOrganizationInput } from "./schema.js";
 
+/** Qui a déclenché la création — trace différemment selon le cas dans l'audit
+ * (voir plus bas) : une auto-inscription n'a pas de Super Admin à citer, une
+ * création plateforme (§5.29) n'a pas d'utilisateur-acteur (le premier admin créé
+ * n'a encore rien fait lui-même). */
+export type CreateOrganizationActor =
+  | { type: "self_registration" }
+  | { type: "platform_admin"; platformAdminId: string; platformAdminEmail: string };
+
 /**
  * Créée hors du client scopé (l'organisation n'existe pas encore) : c'est, avec le
  * module `platform`, l'un des seuls endroits autorisés à écrire via `db/prisma.ts`
  * directement (voir §2 du plan).
  */
-export async function createOrganization(input: CreateOrganizationInput) {
+export async function createOrganization(
+  input: CreateOrganizationInput,
+  actor: CreateOrganizationActor = { type: "self_registration" },
+) {
   const existing = await prisma.organization.findUnique({ where: { slug: input.organizationSlug } });
   if (existing) {
     throw Conflict("Cet identifiant d'espace de travail est déjà utilisé");
@@ -23,7 +34,7 @@ export async function createOrganization(input: CreateOrganizationInput) {
 
   const hashedPassword = await bcrypt.hash(input.adminPassword, 10);
 
-  return prisma.$transaction(async (tx) => {
+  const { organization, adminUser } = await prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({
       data: { name: input.organizationName, slug: input.organizationSlug },
     });
@@ -47,6 +58,24 @@ export async function createOrganization(input: CreateOrganizationInput) {
 
     return { organization, adminUser };
   });
+
+  // `ORGANIZATION_CREATED` existait dans l'enum sans jamais être écrit avant §5.29 —
+  // trouvé en auditant ce fichier pour la création déclenchée par un Super Admin.
+  // Client scopé construit ad hoc (même pattern que confirmPasswordReset ci-dessous
+  // et les jobs cron) : l'organisation vient d'être créée, il n'y a pas de req.db.
+  const db = getScopedClient(organization.id);
+  await recordAuditLog(db, {
+    ...(actor.type === "self_registration" ? { userId: adminUser.id } : {}),
+    action: AuditAction.ORGANIZATION_CREATED,
+    entity: "Organization",
+    entityId: organization.id,
+    meta:
+      actor.type === "platform_admin"
+        ? { triggeredBy: "platform_admin", platformAdminId: actor.platformAdminId, platformAdminEmail: actor.platformAdminEmail }
+        : { triggeredBy: "self_registration" },
+  });
+
+  return { organization, adminUser };
 }
 
 /**

@@ -45,6 +45,9 @@ export const listCallsQuerySchema = z.object({
    * logique — voir listCalls dans service.ts.
    */
   excludeStatusKey: z.string().optional(),
+  /** §5.18 — Journal admin : ignoré si l'appelant n'a pas calls.viewAll, voir
+   * listCalls dans service.ts (jamais fait confiance tel quel côté client). */
+  userId: z.string().optional(),
   type: z.enum(["PROSPECTION", "SUPPORT", "FOLLOW_UP", "OTHER"]).optional(),
   waveNumber: z.coerce.number().int().optional(),
   from: z.coerce.date().optional(),

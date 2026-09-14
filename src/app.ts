@@ -5,6 +5,10 @@ import { errorHandler } from "./middleware/errorHandler.js";
 import { apiRateLimit } from "./middleware/rateLimit.js";
 import { auditLogRouter } from "./modules/auditLog/routes.js";
 import { authRouter } from "./modules/auth/routes.js";
+import { platformAuthRouter } from "./modules/platform/auth/routes.js";
+import { platformAdminsRouter } from "./modules/platform/admins/routes.js";
+import { platformDashboardRouter } from "./modules/platform/dashboard/routes.js";
+import { platformOrganizationsRouter } from "./modules/platform/organizations/routes.js";
 import { callsRouter } from "./modules/calls/routes.js";
 import { calendarEventsRouter, calendarsRouter, eventCategoriesRouter } from "./modules/calendar/routes.js";
 import { clientsRouter } from "./modules/clients/routes.js";
@@ -105,6 +109,12 @@ export function createApp() {
   app.use("/emails", emailsRouter);
   app.use("/reports", reportsRouter);
   app.use("/audit-logs", auditLogRouter);
+
+  // §5.29 — jamais authMiddleware/tenantMiddleware ici (voir middleware/platformAuth.ts).
+  app.use("/platform/auth", platformAuthRouter);
+  app.use("/platform/organizations", platformOrganizationsRouter);
+  app.use("/platform/admins", platformAdminsRouter);
+  app.use("/platform/dashboard", platformDashboardRouter);
 
   app.use(errorHandler);
 

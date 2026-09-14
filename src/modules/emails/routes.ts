@@ -35,6 +35,15 @@ emailsRouter.patch("/templates/:id", requirePermission("emails.manageTemplates")
   }
 });
 
+emailsRouter.delete("/templates/:id", requirePermission("emails.manageTemplates"), async (req, res, next) => {
+  try {
+    await emailsService.deleteTemplate(req.db!, req.user!, requireParam(req, "id"));
+    res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
 emailsRouter.get("/history", requirePermission("emails.viewHistory"), async (req, res, next) => {
   try {
     const clientId = typeof req.query.clientId === "string" ? req.query.clientId : undefined;

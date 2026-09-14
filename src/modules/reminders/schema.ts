@@ -20,5 +20,9 @@ export const listRemindersQuerySchema = z.object({
   status: z.enum(["PENDING", "DONE", "CANCELED"]).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  /** §5.19 — ignoré sans reminders.viewAll ; même avec elle, ne donne jamais accès
+   * aux rappels personnels (callId: null) d'un AUTRE utilisateur — voir listReminders
+   * dans service.ts, la garantie est structurelle, pas un simple filtre optionnel. */
+  userId: z.string().optional(),
 });
 export type ListRemindersQuery = z.infer<typeof listRemindersQuerySchema>;

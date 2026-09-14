@@ -56,6 +56,12 @@ export const PERMISSIONS_CATALOG: PermissionDefinition[] = [
 
   // --- Rappels ---
   { key: "reminders.view", module: "Rappels", label: "Voir les rappels" },
+  {
+    key: "reminders.viewAll",
+    module: "Rappels",
+    label: "Voir les rappels de tous les utilisateurs (liés à un appel/client uniquement)",
+    description: "Ne donne jamais accès aux pense-bêtes personnels (sans appel/client rattaché) d'un autre utilisateur — voir modules/reminders/service.ts.",
+  },
   { key: "reminders.create", module: "Rappels", label: "Créer un rappel" },
   { key: "reminders.update", module: "Rappels", label: "Modifier un rappel" },
   { key: "reminders.delete", module: "Rappels", label: "Supprimer un rappel" },
@@ -90,5 +96,11 @@ export const PERMISSIONS_CATALOG: PermissionDefinition[] = [
 
   // --- Rapports & audit ---
   { key: "reports.view", module: "Rapports", label: "Voir les rapports" },
+  {
+    key: "reports.viewAll",
+    module: "Rapports",
+    label: "Voir les rapports de tous les agents",
+    description: "Sans elle, reports.view ne donne accès qu'aux statistiques personnelles de l'appelant (§5.17).",
+  },
   { key: "auditLog.view", module: "Audit", label: "Consulter le journal d'audit" },
 ];

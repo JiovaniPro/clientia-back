@@ -55,6 +55,9 @@ export const DEFAULT_ROLES: DefaultRoleDefinition[] = [
       "calendar.create",
       "emails.send",
       "emails.viewHistory",
+      // §5.17 — accès à ses propres statistiques uniquement (jamais reports.viewAll,
+      // réservé à Administrateur) : voir modules/reports/service.ts::canViewAll.
+      "reports.view",
     ],
   },
   {
@@ -86,6 +89,9 @@ export const DEFAULT_ROLES: DefaultRoleDefinition[] = [
       "notifications.view",
       "emails.send",
       "emails.viewHistory",
+      // §5.17 — accès à ses propres statistiques uniquement (jamais reports.viewAll,
+      // réservé à Administrateur) : voir modules/reports/service.ts::canViewAll.
+      "reports.view",
     ],
   },
 ];
