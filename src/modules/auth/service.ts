@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "../../db/prisma.js";
+import { getScopedClient } from "../../db/scopedClient.js";
+import { AuditAction } from "../../generated/prisma/enums.js";
+import { recordAuditLog } from "../../lib/auditLog.js";
 import { Unauthorized } from "../../lib/httpError.js";
 import {
   refreshTokenExpiryDate,
@@ -8,7 +11,8 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from "../../lib/jwt.js";
-import type { LoginInput } from "./schema.js";
+import { hashResetToken } from "../../lib/passwordReset.js";
+import type { ConfirmPasswordResetInput, LoginInput } from "./schema.js";
 
 interface SessionMeta {
   userAgent: string | undefined;
@@ -109,4 +113,37 @@ export async function logout(refreshToken: string) {
 
 export async function me(userId: string) {
   return buildAuthPayload(userId);
+}
+
+/**
+ * Public par nécessité (l'utilisateur qui clique le lien n'est pas connecté) — voir
+ * modules/users/service.ts::issuePasswordResetLink pour l'émission du jeton. Toute
+ * session existante est révoquée : un mot de passe qui vient de changer ne doit pas
+ * laisser d'anciennes sessions valides tourner avec l'ancien secret.
+ */
+export async function confirmPasswordReset(input: ConfirmPasswordResetInput) {
+  const tokenHash = hashResetToken(input.token);
+  const tokenRow = await prisma.passwordResetToken.findUnique({ where: { tokenHash }, include: { user: true } });
+  if (!tokenRow || tokenRow.usedAt || tokenRow.expiresAt < new Date()) {
+    throw Unauthorized("Lien de réinitialisation invalide ou expiré");
+  }
+
+  const hashedPassword = await bcrypt.hash(input.newPassword, 10);
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: tokenRow.userId }, data: { password: hashedPassword } }),
+    prisma.passwordResetToken.update({ where: { id: tokenRow.id }, data: { usedAt: new Date() } }),
+    prisma.session.updateMany({ where: { userId: tokenRow.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+  ]);
+
+  // Client scopé construit ad hoc (pas de req.db avant authentification) — même
+  // pattern que les jobs cron (voir jobs/eventReminders.ts), uniquement pour que
+  // recordAuditLog reçoive l'organizationId attendu.
+  const db = getScopedClient(tokenRow.user.organizationId);
+  await recordAuditLog(db, {
+    userId: tokenRow.userId,
+    action: AuditAction.PASSWORD_RESET,
+    entity: "User",
+    entityId: tokenRow.userId,
+    meta: { triggeredBy: "user" },
+  });
 }

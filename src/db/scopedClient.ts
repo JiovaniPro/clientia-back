@@ -60,6 +60,7 @@ const RELATION_SCOPED_MODELS: Record<string, string> = {
   EventReminderFiring: "event",
   EventConflict: "event",
   RolePermission: "role",
+  PasswordResetToken: "user",
 };
 
 const WHERE_SCOPED_OPERATIONS = new Set([

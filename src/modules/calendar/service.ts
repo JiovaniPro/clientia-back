@@ -16,6 +16,7 @@ import type {
   CreateEventInput,
   CreateEventReminderInput,
   ListEventsQuery,
+  SuggestSlotsQuery,
   UpdateAttendeeStatusInput,
   UpdateCalendarInput,
   UpdateEventCategoryInput,
@@ -402,6 +403,24 @@ export async function listEvents(db: ScopedPrismaClient, user: AuthenticatedUser
   const pendingInvitationInclude = {
     attendees: { where: { userId: user.id, status: "PENDING" as const }, select: { id: true } },
   };
+  /**
+   * Sous-lot C4 — indicateur de conflit sur la grille : seulement la sévérité,
+   * jamais le détail de l'autre événement (réservé au panneau, voir `getEvent`).
+   * `isResolved: false` : un conflit résolu ne doit plus attirer l'œil sur la
+   * grille — il reste consultable (historique) dans le panneau de l'événement.
+   * Uniquement sur `plainEvents`/`modifiedOccurrences` (lignes réelles) — jamais
+   * sur les occurrences virtuelles d'un événement récurrent ci-dessous : le calcul
+   * de conflit (voir lib/conflictDetection.ts) ne porte que sur `startAt`/`endAt`
+   * stockés de l'événement modèle, pas sur chaque occurrence recalculée. Attacher
+   * ce même conflit à toutes les occurrences futures serait trompeur (elles ne se
+   * chevauchent pas forcément avec la même chose) — limitation héritée du sous-lot
+   * B, non étendue ici faute de demande explicite en ce sens (à la différence des
+   * rappels d'événement, sous-lot C3, où la question avait été tranchée).
+   */
+  const conflictSeverityInclude = {
+    conflictsA: { where: { isResolved: false }, select: { severity: true } },
+    conflictsB: { where: { isResolved: false }, select: { severity: true } },
+  };
 
   const [plainEvents, recurringParents, modifiedOccurrences] = await Promise.all([
     db.calendarEvent.findMany({
@@ -414,7 +433,7 @@ export async function listEvents(db: ScopedPrismaClient, user: AuthenticatedUser
         startAt: { lt: query.to },
         endAt: { gt: query.from },
       },
-      include: pendingInvitationInclude,
+      include: { ...pendingInvitationInclude, ...conflictSeverityInclude },
     }),
     db.calendarEvent.findMany({
       where: { ...calendarFilter, ...typeFilter, ...accessFilter, isRecurring: true, recurrenceId: null },
@@ -429,13 +448,29 @@ export async function listEvents(db: ScopedPrismaClient, user: AuthenticatedUser
         startAt: { lt: query.to },
         endAt: { gt: query.from },
       },
-      include: pendingInvitationInclude,
+      include: { ...pendingInvitationInclude, ...conflictSeverityInclude },
     }),
   ]);
 
-  function withPendingFlag<T extends { attendees: { id: string }[] }>(event: T) {
-    const { attendees, ...rest } = event;
-    return { ...rest, hasPendingInvitation: attendees.length > 0 };
+  const SEVERITY_RANK: Record<string, number> = { INFO: 1, WARNING: 2, CRITICAL: 3 };
+  function worstSeverity(conflicts: { severity: string }[]): "INFO" | "WARNING" | "CRITICAL" | null {
+    if (conflicts.length === 0) return null;
+    let worst = conflicts[0]!.severity;
+    for (const c of conflicts) {
+      if (SEVERITY_RANK[c.severity]! > SEVERITY_RANK[worst]!) worst = c.severity;
+    }
+    return worst as "INFO" | "WARNING" | "CRITICAL";
+  }
+
+  function withDerivedFields<
+    T extends { attendees: { id: string }[]; conflictsA?: { severity: string }[]; conflictsB?: { severity: string }[] },
+  >(event: T) {
+    const { attendees, conflictsA, conflictsB, ...rest } = event;
+    return {
+      ...rest,
+      hasPendingInvitation: attendees.length > 0,
+      conflictSeverity: conflictsA || conflictsB ? worstSeverity([...(conflictsA ?? []), ...(conflictsB ?? [])]) : null,
+    };
   }
 
   const virtualOccurrences = recurringParents.flatMap((parent) => {
@@ -445,7 +480,7 @@ export async function listEvents(db: ScopedPrismaClient, user: AuthenticatedUser
       query.from,
       query.to,
     );
-    const parentWithFlag = withPendingFlag(parent);
+    const parentWithFlag = withDerivedFields(parent);
     return occurrences.map((occurrence) => ({
       ...parentWithFlag,
       id: `${parent.id}::${occurrence.start.toISOString()}`,
@@ -456,7 +491,7 @@ export async function listEvents(db: ScopedPrismaClient, user: AuthenticatedUser
     }));
   });
 
-  return [...plainEvents.map(withPendingFlag), ...modifiedOccurrences.map(withPendingFlag), ...virtualOccurrences].sort(
+  return [...plainEvents.map(withDerivedFields), ...modifiedOccurrences.map(withDerivedFields), ...virtualOccurrences].sort(
     (a, b) => a.startAt.getTime() - b.startAt.getTime(),
   );
 }
@@ -495,10 +530,67 @@ function canReadEvent(
   return true;
 }
 
+function canWriteEvent(user: AuthenticatedUser, event: { organizerId: string; agentRdvId: string | null }): boolean {
+  if (user.permissions.includes("calendar.viewAll")) return true;
+  return event.organizerId === user.id || event.agentRdvId === user.id;
+}
+
 function assertCanWriteEvent(user: AuthenticatedUser, event: { organizerId: string; agentRdvId: string | null }): void {
-  if (user.permissions.includes("calendar.viewAll")) return;
-  if (event.organizerId === user.id || event.agentRdvId === user.id) return;
-  throw Forbidden("Vous ne pouvez pas modifier cet événement");
+  if (!canWriteEvent(user, event)) throw Forbidden("Vous ne pouvez pas modifier cet événement");
+}
+
+const conflictOtherEventSelect = { id: true, title: true, startAt: true, endAt: true } as const;
+const conflictResolvedBySelect = { id: true, firstName: true, lastName: true } as const;
+
+/**
+ * Sous-lot C4 — bug trouvé en relisant le sous-lot B : cette route n'incluait que
+ * `conflictsA` (conflits où CET événement a déclenché la synchronisation), jamais
+ * `conflictsB` (conflits où c'est L'AUTRE événement de la paire qui a écrit la
+ * ligne, avec `conflictingId` pointant ici). Concrètement : je crée A, puis je crée
+ * B qui chevauche A → B écrit `{eventId: B, conflictingId: A}`. Rouvrir A sans le
+ * modifier ne remontait jamais ce conflit — pas un manque d'affichage, un vrai gap
+ * fonctionnel dans le calcul déjà en place. Corrigé en fusionnant les deux sens ici.
+ */
+function mergeConflicts(event: {
+  conflictsA: {
+    id: string;
+    severity: string;
+    overlapMinutes: number;
+    isResolved: boolean;
+    resolvedAt: Date | null;
+    conflicting: { id: string; title: string; startAt: Date; endAt: Date };
+    resolvedBy: { id: string; firstName: string | null; lastName: string | null } | null;
+  }[];
+  conflictsB: {
+    id: string;
+    severity: string;
+    overlapMinutes: number;
+    isResolved: boolean;
+    resolvedAt: Date | null;
+    event: { id: string; title: string; startAt: Date; endAt: Date };
+    resolvedBy: { id: string; firstName: string | null; lastName: string | null } | null;
+  }[];
+}) {
+  return [
+    ...event.conflictsA.map((c) => ({
+      id: c.id,
+      otherEvent: c.conflicting,
+      severity: c.severity,
+      overlapMinutes: c.overlapMinutes,
+      isResolved: c.isResolved,
+      resolvedAt: c.resolvedAt,
+      resolvedBy: c.resolvedBy,
+    })),
+    ...event.conflictsB.map((c) => ({
+      id: c.id,
+      otherEvent: c.event,
+      severity: c.severity,
+      overlapMinutes: c.overlapMinutes,
+      isResolved: c.isResolved,
+      resolvedAt: c.resolvedAt,
+      resolvedBy: c.resolvedBy,
+    })),
+  ];
 }
 
 export async function getEvent(db: ScopedPrismaClient, user: AuthenticatedUser, id: string) {
@@ -510,12 +602,188 @@ export async function getEvent(db: ScopedPrismaClient, user: AuthenticatedUser, 
       attendees: true,
       reminders: true,
       statusHistory: { orderBy: { changedAt: "desc" }, include: { changedBy: { select: { id: true, firstName: true, lastName: true } } } },
-      conflictsA: true,
+      conflictsA: { include: { conflicting: { select: conflictOtherEventSelect }, resolvedBy: { select: conflictResolvedBySelect } } },
+      conflictsB: { include: { event: { select: conflictOtherEventSelect }, resolvedBy: { select: conflictResolvedBySelect } } },
     },
   });
   if (!event) throw NotFound("Événement introuvable");
   if (!canReadEvent(user, event)) throw Forbidden("Vous ne pouvez pas voir cet événement");
-  return event;
+  const { conflictsA, conflictsB, ...rest } = event;
+  return { ...rest, conflicts: mergeConflicts(event) };
+}
+
+/**
+ * Sous-lot C4 — décision actée : quiconque peut écrire sur AU MOINS UN des deux
+ * événements de la paire peut marquer le conflit résolu (les deux événements
+ * peuvent avoir des organisateurs différents). Idempotent : re-résoudre un conflit
+ * déjà résolu ne renvoie pas d'erreur, juste la ligne inchangée — évite un échec
+ * inutile en cas de double clic/course entre deux onglets.
+ *
+ * Bug trouvé en testant en direct (pas en écrivant le code) : cette fonction
+ * renvoyait la ligne `EventConflict` brute (eventId/conflictingId), pas la forme
+ * fusionnée `{otherEvent, resolvedBy}` que `getEvent`/`mergeConflicts` produisent
+ * — le frontend, qui remplace l'entrée locale par cette réponse, plantait en
+ * lisant `otherEvent.title` sur un objet qui ne l'a jamais eu. `eventId` (le
+ * `:id` de la route, celui dont le panneau est ouvert) indique quel côté de la
+ * paire est "l'autre" du point de vue de ce viewer.
+ */
+export async function resolveConflict(
+  db: ScopedPrismaClient,
+  user: AuthenticatedUser,
+  eventId: string,
+  conflictId: string,
+) {
+  const conflict = await db.eventConflict.findFirst({
+    where: { id: conflictId },
+    include: {
+      event: { select: { id: true, organizerId: true, agentRdvId: true, title: true, startAt: true, endAt: true } },
+      conflicting: { select: { id: true, organizerId: true, agentRdvId: true, title: true, startAt: true, endAt: true } },
+    },
+  });
+  if (!conflict) throw NotFound("Conflit introuvable");
+  if (!canWriteEvent(user, conflict.event) && !canWriteEvent(user, conflict.conflicting)) {
+    throw Forbidden("Vous ne pouvez pas résoudre ce conflit");
+  }
+
+  const updated = conflict.isResolved
+    ? conflict
+    : await db.eventConflict.update({
+        where: { id: conflictId },
+        data: { isResolved: true, resolvedAt: new Date(), resolvedById: user.id },
+        include: {
+          event: { select: conflictOtherEventSelect },
+          conflicting: { select: conflictOtherEventSelect },
+          resolvedBy: { select: conflictResolvedBySelect },
+        },
+      });
+
+  return {
+    id: updated.id,
+    otherEvent: conflict.event.id === eventId ? updated.conflicting : updated.event,
+    severity: updated.severity,
+    overlapMinutes: updated.overlapMinutes,
+    isResolved: updated.isResolved,
+    resolvedAt: updated.resolvedAt,
+    resolvedBy: "resolvedBy" in updated ? updated.resolvedBy : null,
+  };
+}
+
+const DEFAULT_WORK_START_HOUR = 8;
+const DEFAULT_WORK_END_HOUR = 18;
+const MAX_SUGGESTED_SLOTS = 5;
+const MAX_BUSINESS_DAYS_SCANNED = 15;
+
+/**
+ * Sous-lot C4 — pas de champ de schéma dédié pour les heures de travail : réutilise
+ * le modèle `Setting` générique déjà existant (clé/valeur par utilisateur, voir
+ * modules/settings/), sous la clé `calendar.workingHours`. Un override ponctuel
+ * dans la requête (sans persistance) prime sur la valeur enregistrée, qui prime
+ * elle-même sur le défaut 8h-18h.
+ */
+async function resolveWorkingHours(
+  db: ScopedPrismaClient,
+  user: AuthenticatedUser,
+  override: { workStartHour: number | undefined; workEndHour: number | undefined },
+) {
+  if (override.workStartHour !== undefined && override.workEndHour !== undefined) {
+    return { start: override.workStartHour, end: override.workEndHour };
+  }
+  const setting = await db.setting.findFirst({ where: { userId: user.id, key: "calendar.workingHours" } });
+  const stored = setting?.value as { start?: number; end?: number } | undefined;
+  return {
+    start: override.workStartHour ?? stored?.start ?? DEFAULT_WORK_START_HOUR,
+    end: override.workEndHour ?? stored?.end ?? DEFAULT_WORK_END_HOUR,
+  };
+}
+
+function isBusinessDay(date: Date): boolean {
+  const day = date.getDay();
+  return day !== 0 && day !== 6;
+}
+
+/**
+ * Sous-lot C4 — jusqu'à 5 créneaux libres, jours ouvrés uniquement (week-ends
+ * exclus), dans la plage horaire de travail. Algorithme en balayage : pour chaque
+ * jour ouvré, fusionne les événements BUSY/TENTATIVE existants (pas besoin de les
+ * trier/fusionner explicitement au préalable — le curseur n'avance jamais en
+ * arrière, donc des blocs qui se chevauchent entre eux sont déjà gérés) et propose
+ * chaque intervalle libre assez long. Portée des calendriers identique à
+ * `listCalendars`/`syncEventConflicts` : les calendriers visibles de l'utilisateur
+ * (les siens + globaux), ou explicitement un seul calendrier si précisé.
+ */
+export async function suggestSlots(db: ScopedPrismaClient, user: AuthenticatedUser, query: SuggestSlotsQuery) {
+  const { start: workStart, end: workEnd } = await resolveWorkingHours(db, user, {
+    workStartHour: query.workStartHour,
+    workEndHour: query.workEndHour,
+  });
+  if (workEnd <= workStart) throw BadRequest("Heures de travail invalides");
+  const workWindowMinutes = (workEnd - workStart) * 60;
+  if (query.durationMinutes > workWindowMinutes) {
+    throw BadRequest("La durée demandée dépasse la plage horaire de travail");
+  }
+
+  let calendarIds: string[];
+  if (query.calendarId) {
+    const calendar = await db.calendar.findUnique({ where: { id: query.calendarId } });
+    if (!calendar) throw NotFound("Calendrier introuvable");
+    if (calendar.userId !== user.id && !calendar.isGlobal && !user.permissions.includes("calendar.viewAll")) {
+      throw Forbidden("Calendrier non visible");
+    }
+    calendarIds = [calendar.id];
+  } else {
+    const visible = await db.calendar.findMany({
+      where: user.permissions.includes("calendar.viewAll") ? {} : { OR: [{ userId: user.id }, { isGlobal: true }] },
+      select: { id: true },
+    });
+    calendarIds = visible.map((c) => c.id);
+  }
+
+  const now = new Date();
+  let cursorDay = new Date(Math.max(query.preferredDate.getTime(), now.getTime()));
+  cursorDay = new Date(cursorDay.getFullYear(), cursorDay.getMonth(), cursorDay.getDate());
+
+  const slots: { startAt: Date; endAt: Date }[] = [];
+  let scannedDays = 0;
+  const durationMs = query.durationMinutes * 60000;
+
+  while (slots.length < MAX_SUGGESTED_SLOTS && scannedDays < MAX_BUSINESS_DAYS_SCANNED) {
+    if (isBusinessDay(cursorDay)) {
+      scannedDays++;
+      const windowStart = new Date(cursorDay);
+      windowStart.setHours(workStart, 0, 0, 0);
+      const windowEnd = new Date(cursorDay);
+      windowEnd.setHours(workEnd, 0, 0, 0);
+      const searchStart = windowStart < now ? now : windowStart;
+
+      if (searchStart < windowEnd) {
+        const busy = await db.calendarEvent.findMany({
+          where: {
+            calendarId: { in: calendarIds },
+            availability: { in: ["BUSY", "TENTATIVE"] },
+            startAt: { lt: windowEnd },
+            endAt: { gt: searchStart },
+          },
+          orderBy: { startAt: "asc" },
+          select: { startAt: true, endAt: true },
+        });
+
+        let cursor = searchStart;
+        for (const block of busy) {
+          if (slots.length >= MAX_SUGGESTED_SLOTS) break;
+          if (block.startAt.getTime() - cursor.getTime() >= durationMs) {
+            slots.push({ startAt: cursor, endAt: new Date(cursor.getTime() + durationMs) });
+          }
+          if (block.endAt > cursor) cursor = block.endAt;
+        }
+        if (slots.length < MAX_SUGGESTED_SLOTS && windowEnd.getTime() - cursor.getTime() >= durationMs) {
+          slots.push({ startAt: cursor, endAt: new Date(cursor.getTime() + durationMs) });
+        }
+      }
+    }
+    cursorDay = new Date(cursorDay.getFullYear(), cursorDay.getMonth(), cursorDay.getDate() + 1);
+  }
+
+  return slots.slice(0, MAX_SUGGESTED_SLOTS);
 }
 
 export async function updateEvent(db: ScopedPrismaClient, user: AuthenticatedUser, id: string, input: UpdateEventInput) {

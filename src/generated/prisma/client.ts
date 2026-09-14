@@ -98,6 +98,20 @@ export type CustomFieldValue = Prisma.CustomFieldValueModel
  */
 export type User = Prisma.UserModel
 /**
+ * Model PasswordResetToken
+ * *
+ *  * Sous-lot "Utilisateurs" — §2.2 : "plus sûr d'envoyer un lien de réinitialisation
+ *  * que de laisser l'admin taper le nouveau mot de passe lui-même". Réutilisé aussi à
+ *  * la création d'un compte (l'admin ne choisit jamais le mot de passe initial non
+ *  * plus — même raisonnement, même mécanisme). `tokenHash` : seul le hash SHA-256 du
+ *  * jeton est stocké — le jeton brut n'existe que dans l'e-mail envoyé et dans l'URL
+ *  * que l'utilisateur ouvre, jamais en base (une fuite de la table ne permet pas de
+ *  * réutiliser un lien). Usage unique (`usedAt`) et expiration courte (voir
+ *  * lib/passwordReset.ts) ; pas de suppression physique — la ligne reste comme trace
+ *  * d'audit même après usage/expiration.
+ */
+export type PasswordResetToken = Prisma.PasswordResetTokenModel
+/**
  * Model Session
  * 
  */

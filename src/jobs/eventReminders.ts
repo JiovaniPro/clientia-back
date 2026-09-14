@@ -3,7 +3,7 @@ import { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../db/prisma.js";
 import { getScopedClient } from "../db/scopedClient.js";
 import { createNotification } from "../lib/notifications.js";
-import { enqueueReminderEmail } from "../modules/emails/service.js";
+import { enqueueInternalEmail } from "../modules/emails/service.js";
 import { expandRecurrence } from "../lib/rrule.js";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" });
@@ -110,7 +110,7 @@ export async function processEventReminders() {
 
     const label = dateTimeFormatter.format(item.occurrenceStartAt);
     if (item.method === "EMAIL") {
-      await enqueueReminderEmail(db, item.organizationId, {
+      await enqueueInternalEmail(db, item.organizationId, {
         recipientUserId: item.organizerId,
         subject: `Rappel : ${item.eventTitle}`,
         body: `Votre événement « ${item.eventTitle} » commence le ${label}.`,

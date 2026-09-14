@@ -155,3 +155,23 @@ export const listEventsQuerySchema = z.object({
   type: eventTypeEnum.optional(),
 });
 export type ListEventsQuery = z.infer<typeof listEventsQuerySchema>;
+
+/**
+ * Sous-lot C4 — heures de travail en override ponctuel de l'appel (ne persiste
+ * rien) ; si absentes, le service lit le `Setting` `calendar.workingHours` de
+ * l'utilisateur (clé/valeur générique déjà existante, réutilisée ici plutôt que
+ * d'ajouter un champ de schéma dédié), avec repli sur 8h-18h.
+ */
+export const suggestSlotsQuerySchema = z
+  .object({
+    durationMinutes: z.coerce.number().int().min(1).max(1440),
+    preferredDate: z.coerce.date(),
+    calendarId: z.string().optional(),
+    workStartHour: z.coerce.number().int().min(0).max(23).optional(),
+    workEndHour: z.coerce.number().int().min(0).max(23).optional(),
+  })
+  .refine((d) => d.workStartHour === undefined || d.workEndHour === undefined || d.workEndHour > d.workStartHour, {
+    message: "workEndHour doit être après workStartHour",
+    path: ["workEndHour"],
+  });
+export type SuggestSlotsQuery = z.infer<typeof suggestSlotsQuerySchema>;

@@ -3,7 +3,7 @@ import { authMiddleware } from "../../middleware/auth.js";
 import { authRateLimit } from "../../middleware/rateLimit.js";
 import { Unauthorized } from "../../lib/httpError.js";
 import * as authService from "./service.js";
-import { loginSchema } from "./schema.js";
+import { confirmPasswordResetSchema, loginSchema } from "./schema.js";
 
 const REFRESH_COOKIE = "refreshToken";
 const isProd = process.env.NODE_ENV === "production";
@@ -63,6 +63,17 @@ authRouter.post("/logout", async (req, res, next) => {
     const token = req.cookies?.[REFRESH_COOKIE];
     if (token) await authService.logout(token);
     res.clearCookie(REFRESH_COOKIE, { path: "/auth" });
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Public — voir modules/auth/service.ts::confirmPasswordReset. */
+authRouter.post("/reset-password/confirm", authRateLimit, async (req, res, next) => {
+  try {
+    const input = confirmPasswordResetSchema.parse(req.body);
+    await authService.confirmPasswordReset(input);
     res.status(204).send();
   } catch (error) {
     next(error);

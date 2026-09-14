@@ -12,6 +12,7 @@ import {
   createEventReminderSchema,
   createEventSchema,
   listEventsQuerySchema,
+  suggestSlotsQuerySchema,
   updateAttendeeStatusSchema,
   updateCalendarSchema,
   updateEventCategorySchema,
@@ -143,6 +144,21 @@ calendarEventsRouter.get("/pending-invitations-count", requirePermission("calend
   }
 });
 
+/**
+ * Sous-lot C4 — enregistré AVANT `GET /:id` pour la même raison qu'`agent-availability`
+ * et `pending-invitations-count` ci-dessus (sinon Express matcherait "suggest-slots"
+ * comme valeur de `:id`). Gate `calendar.create` : sert à préparer la création d'un
+ * événement, pas juste à consulter.
+ */
+calendarEventsRouter.get("/suggest-slots", requirePermission("calendar.create"), async (req, res, next) => {
+  try {
+    const query = suggestSlotsQuerySchema.parse(req.query);
+    res.json(await calendarService.suggestSlots(req.db!, req.user!, query));
+  } catch (error) {
+    next(error);
+  }
+});
+
 calendarEventsRouter.get("/:id", requirePermission("calendar.view"), async (req, res, next) => {
   try {
     res.json(await calendarService.getEvent(req.db!, req.user!, requireParam(req, "id")));
@@ -259,3 +275,28 @@ calendarEventsRouter.delete("/:id/reminders/:reminderId", requirePermission("cal
     next(error);
   }
 });
+
+/**
+ * Sous-lot C4 — `:id` dans l'URL n'est utilisé que pour la cohérence de la route
+ * (sous-ressource de l'événement) ; l'autorisation réelle (écrire sur AU MOINS UN
+ * des deux événements de la paire, décision actée) est vérifiée dans le service à
+ * partir du conflit lui-même, pas de `:id` seul.
+ */
+calendarEventsRouter.patch(
+  "/:id/conflicts/:conflictId/resolve",
+  requirePermission("calendar.update"),
+  async (req, res, next) => {
+    try {
+      res.json(
+        await calendarService.resolveConflict(
+          req.db!,
+          req.user!,
+          requireParam(req, "id"),
+          requireParam(req, "conflictId"),
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);

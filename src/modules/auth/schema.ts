@@ -12,3 +12,13 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Mot de passe requis"),
 });
 export type LoginInput = z.infer<typeof loginSchema>;
+
+/**
+ * Public (pas d'espace de travail à saisir) — le jeton identifie déjà l'utilisateur
+ * et son organisation sans ambiguïté (voir modules/users/service.ts::issuePasswordResetLink).
+ */
+export const confirmPasswordResetSchema = z.object({
+  token: z.string().min(1),
+  newPassword: z.string().min(8, "8 caractères minimum"),
+});
+export type ConfirmPasswordResetInput = z.infer<typeof confirmPasswordResetSchema>;

@@ -196,13 +196,15 @@ export async function enqueueEmail(
 }
 
 /**
- * Rappel d'événement (sous-lot C3, méthode EMAIL) — même file/mêmes retries que
- * `enqueueEmail` (décision actée : pas d'envoi direct qui peut se perdre sur un
- * échec SMTP ponctuel), mais destinataire = User (organisateur), pas de Client ni
- * d'EmailTemplate organisation : contenu fixe composé ici (`directSubject`/
- * `directBody`), pas de placeholders — hors périmètre de C3.
+ * E-mail interne (destinataire = User, pas Client) — même file/mêmes retries que
+ * `enqueueEmail` (décision actée au sous-lot C3 : pas d'envoi direct qui peut se
+ * perdre sur un échec SMTP ponctuel), mais sans EmailTemplate organisation :
+ * contenu fixe composé par l'appelant (`directSubject`/`directBody`), pas de
+ * placeholders. Introduit pour les rappels d'événement (C3, méthode EMAIL),
+ * réutilisé pour les liens de réinitialisation de mot de passe (sous-lot
+ * Utilisateurs) — générique malgré le nom historique du fichier appelant.
  */
-export async function enqueueReminderEmail(
+export async function enqueueInternalEmail(
   db: ScopedPrismaClient,
   organizationId: string,
   params: { recipientUserId: string; subject: string; body: string },

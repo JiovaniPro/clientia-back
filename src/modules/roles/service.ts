@@ -7,6 +7,14 @@ import type { CreateRoleInput, UpdateRoleInput } from "./schema.js";
 
 /** `Permission` est un catalogue global, jamais scopé — lu via `db.permission` normalement,
  * l'extension de scoping laisse ce modèle intact (voir db/scopedClient.ts). */
+/** Forme constante des rôles renvoyés — `listRoles`, `createRole` et `updateRole` doivent
+ * toujours renvoyer la même forme (permissions + nombre d'utilisateurs assignés), sinon
+ * l'écran d'administration reçoit un objet incomplet selon l'action qui vient d'être faite. */
+const ROLE_ADMIN_INCLUDE = {
+  permissions: { include: { permission: true } },
+  _count: { select: { users: true } },
+} as const;
+
 async function resolvePermissionIds(db: ScopedPrismaClient, keys: string[]): Promise<string[]> {
   if (keys.length === 0) return [];
   const permissions = await db.permission.findMany({ where: { key: { in: keys } }, select: { id: true, key: true } });
@@ -21,7 +29,7 @@ async function resolvePermissionIds(db: ScopedPrismaClient, keys: string[]): Pro
 export async function listRoles(db: ScopedPrismaClient) {
   return db.role.findMany({
     orderBy: { name: "asc" },
-    include: { permissions: { include: { permission: true } }, _count: { select: { users: true } } },
+    include: ROLE_ADMIN_INCLUDE,
   });
 }
 
@@ -43,7 +51,7 @@ export async function createRole(db: ScopedPrismaClient, user: AuthenticatedUser
       color: input.color ?? null,
       permissions: { create: permissionIds.map((permissionId) => ({ permissionId })) },
     },
-    include: { permissions: { include: { permission: true } } },
+    include: ROLE_ADMIN_INCLUDE,
   });
 
   await recordAuditLog(db, { userId: user.id, action: AuditAction.ROLE_CREATED, entity: "Role", entityId: role.id });
@@ -77,7 +85,7 @@ export async function updateRole(
         description: input.description ?? existing.description,
         color: input.color ?? existing.color,
       },
-      include: { permissions: { include: { permission: true } } },
+      include: ROLE_ADMIN_INCLUDE,
     });
   });
 

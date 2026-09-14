@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { authMiddleware } from "../../middleware/auth.js";
-import { requireAnyPermission } from "../../middleware/requirePermission.js";
+import { requireAnyPermission, requirePermission } from "../../middleware/requirePermission.js";
 import { tenantMiddleware } from "../../middleware/tenant.js";
-import { listUsersQuerySchema } from "./schema.js";
+import { requireParam } from "../../lib/params.js";
+import { createUserSchema, listUsersQuerySchema, setUserStatusSchema, updateUserSchema } from "./schema.js";
 import * as usersService from "./service.js";
 
 export const usersRouter = Router();
@@ -22,6 +23,48 @@ usersRouter.get("/", requireAnyPermission(["clients.view", "users.view"]), async
   try {
     const query = listUsersQuerySchema.parse(req.query);
     res.json(await usersService.listUsers(req.db!, query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+usersRouter.post("/", requirePermission("users.create"), async (req, res, next) => {
+  try {
+    const input = createUserSchema.parse(req.body);
+    res.status(201).json(await usersService.createUser(req.db!, req.user!, input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+usersRouter.patch("/:id", requirePermission("users.update"), async (req, res, next) => {
+  try {
+    const input = updateUserSchema.parse(req.body);
+    res.json(await usersService.updateUser(req.db!, req.user!, requireParam(req, "id"), input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+usersRouter.patch("/:id/status", requirePermission("users.deactivate"), async (req, res, next) => {
+  try {
+    const input = setUserStatusSchema.parse(req.body);
+    res.json(await usersService.setUserStatus(req.db!, req.user!, requireParam(req, "id"), input));
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Gate `users.update` — pas de clé dédiée dans le catalogue pour ce sous-lot
+ * (voir permissionsCatalog.ts : seuls view/create/update/deactivate existaient
+ * avant ce lot) ; réinitialiser un mot de passe est traité comme une modification
+ * du compte.
+ */
+usersRouter.post("/:id/reset-password", requirePermission("users.update"), async (req, res, next) => {
+  try {
+    await usersService.requestPasswordReset(req.db!, req.user!, requireParam(req, "id"));
+    res.status(204).send();
   } catch (error) {
     next(error);
   }
